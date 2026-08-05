@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Factur-X Check — Confidentialité</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    max-width: 38rem;
+    margin: 4rem auto;
+    padding: 0 1.5rem;
+    font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 1.6rem; line-height: 1.25; }
+  h2 { font-size: 1.1rem; margin-top: 2.5rem; }
+  code { font-size: 0.9em; }
+  footer { margin-top: 3rem; font-size: 0.9rem; opacity: 0.7; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+
+<h1>Confidentialité — Factur-X Check</h1>
+
+<p><strong>Factur-X Check ne collecte aucune donnée.</strong> Aucune donnée
+personnelle, aucune donnée d'usage, aucun identifiant, aucune statistique de
+fréquentation, aucun rapport de plantage.</p>
+
+<h2>Vos factures ne sont pas envoyées</h2>
+
+<p>Une facture est un document commercial nominatif : elle porte votre nom,
+celui de votre client, et vos montants. Les validateurs disponibles en ligne
+demandent de la téléverser chez un tiers. Factur-X Check ne le fait pas.
+L'analyse — lecture du PDF, extraction du XML, contrôles, reconnaissance de
+texte — a lieu entièrement sur votre Mac. Aucun fichier, aucun extrait, aucun
+résultat n'en sort.</p>
+
+<h2>Ce n'est pas qu'une promesse</h2>
+
+<p>L'application est distribuée sous bac à sable (<i>sandbox</i>) et ne demande
+qu'une seule autorisation, la lecture des fichiers que vous désignez vous-même
+(<code>com.apple.security.files.user-selected.read-only</code>). Elle ne demande
+<strong>aucune autorisation réseau</strong> : macOS lui interdit donc toute
+connexion, indépendamment de ce que l'application voudrait faire.</p>
+
+<p>Cela se vérifie sans me croire sur parole. Dans le Terminal :</p>
+
+<pre><code>codesign -d --entitlements - "/Applications/Factur-X Check.app"</code></pre>
+
+<p>Le code source est public et sous licence MIT.</p>
+
+<h2>Ce qui est enregistré sur votre Mac</h2>
+
+<p>Uniquement vos réglages — thème d'apparence, lecture automatique du texte —
+dans les préférences de l'application. Ils restent sur votre Mac et ne sont
+lisibles que par vous. Aucune facture, aucun chemin de fichier, aucun rapport
+n'est conservé après la fermeture de l'application.</p>
+
+<h2>Rien n'est partagé avec des tiers</h2>
+
+<p>Puisque rien n'est collecté, rien n'est transmis, vendu, cédé ni analysé —
+ni par moi, ni par un prestataire, ni à des fins publicitaires. L'application
+n'intègre aucune bibliothèque tierce, aucun outil de mesure d'audience.</p>
+
+<h2>Écrire</h2>
+
+<p>Pour toute question sur cette politique ou sur l'application :
+<a href="mailto:daniel@blanc-conseil.fr">daniel@blanc-conseil.fr</a>.</p>
+
+<footer>
+<p>Blanc-Conseil — Daniel-Romain Blanc.<br>
+Dernière mise à jour : 5 août 2026.</p>
+</footer>
+
+</body>
+</html>

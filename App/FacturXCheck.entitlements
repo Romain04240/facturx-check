@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Lecture seule des fichiers que l'utilisateur désigne lui-même : c'est
+	     tout ce dont l'outil a besoin. Aucun droit réseau n'est demandé, ce qui
+	     rend la promesse « rien ne quitte votre Mac » vérifiable par quiconque
+	     inspecte l'application plutôt que de me croire sur parole. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
+</dict>
+</plist>

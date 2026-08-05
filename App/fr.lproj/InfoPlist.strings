@@ -1,0 +1,8 @@
+/* L'application est écrite en français, et c'est sa seule langue. Sans un
+   dossier .lproj déclarant le français, le paquet n'annonce aucune langue :
+   macOS retombe alors sur l'anglais pour tout ce que Foundation met en forme,
+   et l'on obtient « 3 Aug 2026 » et « 4 KB » au milieu d'une interface
+   française. */
+
+"CFBundleName" = "Factur-X Check";
+"CFBundleDisplayName" = "Factur-X Check";
