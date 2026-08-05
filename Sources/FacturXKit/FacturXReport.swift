@@ -1,0 +1,173 @@
+import Foundation
+
+/// L'analyse d'un PDF, indépendante de la façon dont on l'affiche.
+///
+/// Elle vivait dans le `main.swift` de l'outil en ligne de commande. L'y
+/// laisser aurait fait diverger l'application de la commande dès le premier
+/// contrôle ajouté d'un seul côté — et deux outils qui répondent
+/// différemment sur le même fichier ne valent ni l'un ni l'autre.
+public struct FacturXReport: Sendable, Identifiable {
+    public let id = UUID()
+    public let fileName: String
+    public let outcome: Outcome
+    public let invoice: FacturXParsedInvoice?
+    public let xml: Data?
+    public let checks: [Check]
+
+    public enum Outcome: Sendable, Equatable {
+        /// Exploitable comme facture électronique.
+        case sound
+        /// Le XML est là, mais quelque chose cloche.
+        case flawed
+        /// Pas de facture structurée du tout.
+        case notFacturX(String)
+        /// Le fichier n'est pas lisible.
+        case unreadable(String)
+
+        public var isSound: Bool { self == .sound }
+    }
+
+    public struct Check: Sendable, Identifiable {
+        public enum Level: Sendable { case passed, warning, failed }
+        public let id = UUID()
+        public let level: Level
+        public let message: String
+        /// Ce que ça implique concrètement — vide quand le contrôle passe.
+        public let consequence: String?
+
+        init(_ level: Level, _ message: String, consequence: String? = nil) {
+            self.level = level
+            self.message = message
+            self.consequence = consequence
+        }
+    }
+
+    public var xmlString: String? {
+        xml.map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    // MARK: - Analyse
+
+    /// Tolérance d'arrondi sur les contrôles d'addition : un centime. En
+    /// dessous, c'est la conversion décimale du générateur ; au-dessus, c'est
+    /// une erreur de calcul.
+    /// Partagée avec le rapprochement OCR/XML, qui compare les mêmes sommes
+    /// avec la même indulgence.
+    static let cent = Decimal(string: "0.01")!
+
+    public static func analyse(pdf: Data, fileName: String) -> FacturXReport {
+        guard pdf.prefix(4) == Data("%PDF".utf8) else {
+            return FacturXReport(fileName: fileName,
+                                 outcome: .unreadable("Ce fichier n'est pas un PDF."),
+                                 invoice: nil, xml: nil, checks: [])
+        }
+
+        guard let result = FacturXExtractor.read(from: pdf) else {
+            return FacturXReport(
+                fileName: fileName,
+                outcome: .notFacturX("""
+                    Le PDF est lisible, mais il ne porte aucune facture \
+                    structurée. Pour un destinataire, c'est une image : il \
+                    devra ressaisir les montants ou les faire reconnaître.
+                    """),
+                invoice: nil, xml: nil, checks: [])
+        }
+
+        let checks = evaluate(result.invoice)
+        return FacturXReport(fileName: fileName,
+                             outcome: checks.contains { $0.level == .failed } ? .flawed : .sound,
+                             invoice: result.invoice, xml: result.xml, checks: checks)
+    }
+
+    /// Les contrôles, séparés de la lecture du PDF pour qu'ils soient
+    /// testables sans avoir à fabriquer un PDF conforme à chaque cas d'erreur.
+    static func evaluate(_ invoice: FacturXParsedInvoice) -> [Check] {
+        var checks: [Check] = []
+
+        // Les sommes citées dans un message d'échec se lisent comme partout
+        // ailleurs dans l'outil, devise comprise : un écart annoncé « 0,02 € »
+        // se reconnaît du premier coup d'œil, « 0.02 » se relit deux fois.
+        func money(_ value: Decimal) -> String {
+            AmountFormat.money(value, currency: invoice.currencyCode)
+        }
+
+        if let profile = invoice.profile {
+            checks.append(Check(.passed, "Profil déclaré : \(profile.rawValue)"))
+        } else if let urn = invoice.guidelineURN {
+            checks.append(Check(.warning, "Profil non reconnu : \(urn)",
+                                consequence: "Un destinataire strict peut refuser un profil qu'il ne connaît pas."))
+        } else {
+            checks.append(Check(.failed, "Aucun profil déclaré",
+                                consequence: "Le destinataire ne sait pas quelles règles appliquer au document."))
+        }
+
+        checks.append(invoice.number?.isEmpty == false
+            ? Check(.passed, "Numéro de facture présent")
+            : Check(.failed, "Numéro de facture absent",
+                    consequence: "C'est une mention obligatoire : la facture est irrégulière."))
+
+        checks.append(invoice.issueDate != nil
+            ? Check(.passed, "Date d'émission présente")
+            : Check(.failed, "Date d'émission absente",
+                    consequence: "Mention obligatoire, et point de départ des délais de paiement."))
+
+        checks.append(invoice.sellerName?.isEmpty == false
+            ? Check(.passed, "Émetteur identifié")
+            : Check(.failed, "Émetteur absent",
+                    consequence: "Sans émetteur, le destinataire ne peut pas rapprocher la facture."))
+
+        checks.append(invoice.buyerName?.isEmpty == false
+            ? Check(.passed, "Destinataire identifié")
+            : Check(.warning, "Destinataire absent",
+                    consequence: "Toléré par certains profils, refusé par d'autres."))
+
+        // Une somme sans sa monnaie ne veut rien dire, et la deviner d'après
+        // l'émetteur serait exactement ce que cet outil refuse de faire.
+        if let declared = invoice.declaredCurrencyCode, !declared.isEmpty {
+            checks.append(Check(.passed, "Devise déclarée : \(declared)"))
+        } else if let fallback = invoice.amountCurrencyCode, !fallback.isEmpty {
+            checks.append(Check(.warning, "Devise absente du document, lue sur les montants : \(fallback)",
+                                consequence: "La devise de la facture est une mention obligatoire. Un destinataire qui la contrôle refuse, même quand elle se devine."))
+        } else {
+            checks.append(Check(.failed, "Aucune devise",
+                                consequence: "Les montants ne disent pas dans quelle monnaie ils sont comptés."))
+        }
+
+        // Le contrôle qui attrape le plus d'erreurs de génération. Un
+        // destinataire automatisé rejette, et son message est rarement
+        // explicite : « erreur de cohérence » n'aide personne.
+        if let ht = invoice.totalHT, let vat = invoice.totalVAT, let ttc = invoice.totalTTC {
+            let expected = ht + vat
+            let gap = abs(ttc - expected)
+            checks.append(gap <= cent
+                ? Check(.passed, "HT + TVA = TTC")
+                : Check(.failed, "HT + TVA donne \(money(expected)), le TTC déclaré est \(money(ttc))",
+                        consequence: "Écart de \(money(gap)). La plupart des destinataires rejettent sur ce seul point."))
+        } else {
+            checks.append(Check(.warning, "Totaux incomplets",
+                                consequence: "Le contrôle d'addition n'a pas pu être fait."))
+        }
+
+        // La ventilation doit retomber sur le pied de facture, sinon les deux
+        // parties de la facture se contredisent.
+        if !invoice.vatBreakdown.isEmpty, let ht = invoice.totalHT {
+            let sum = invoice.vatBreakdown.reduce(Decimal(0)) { $0 + $1.baseHT }
+            let gap = abs(sum - ht)
+            checks.append(gap <= cent
+                ? Check(.passed, "La ventilation de TVA retombe sur le total HT")
+                : Check(.failed, "Les bases ventilées totalisent \(money(sum)), le total HT déclaré est \(money(ht))",
+                        consequence: "La ventilation contredit le pied de facture."))
+        }
+
+        return checks
+    }
+
+    public static func analyse(fileURL: URL) -> FacturXReport {
+        guard let data = try? Data(contentsOf: fileURL) else {
+            return FacturXReport(fileName: fileURL.lastPathComponent,
+                                 outcome: .unreadable("Fichier illisible ou introuvable."),
+                                 invoice: nil, xml: nil, checks: [])
+        }
+        return analyse(pdf: data, fileName: fileURL.lastPathComponent)
+    }
+}
