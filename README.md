@@ -11,6 +11,10 @@ La réponse en le déposant — et rien ne quitte votre Mac.
 [![42 tests](https://img.shields.io/badge/tests-42-2ea44f)](Tests)
 [![Licence MIT](https://img.shields.io/badge/licence-MIT-0a7cba)](LICENSE)
 
+### [⬇︎ Télécharger l'application](https://github.com/Romain04240/facturx-check/releases/latest)
+
+Signée et notarisée par Apple — macOS 13 ou ultérieur.
+
 </div>
 
 ---
