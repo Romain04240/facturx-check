@@ -41,7 +41,7 @@ targets:
         CFBundleDevelopmentRegion: fr
         LSMinimumSystemVersion: "13.0"
         LSApplicationCategoryType: public.app-category.business
-        NSHumanReadableCopyright: "© 2026 Blanc-Conseil. Distribué sous licence MIT."
+        NSHumanReadableCopyright: "© 2026 Daniel-Romain Blanc — Blanc-Conseil. Distribué sous licence MIT."
         NSSupportsAutomaticTermination: true
         NSSupportsSuddenTermination: true
         # Permet « Ouvrir avec » depuis le Finder sur un PDF, en lecture seule.
