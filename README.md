@@ -178,8 +178,8 @@ facturx-check factures/*.pdf || echo "des factures ne passeront pas"
 
 ## La construire
 
-Le projet Xcode est engendré par [XcodeGen](https://github.com/yonaskolb/XcodeGen)
-à partir de `project.yml`, et n'est donc pas versionné :
+Le projet Xcode est engendré à partir de `project.yml`, et n'est donc pas
+versionné :
 
 ```bash
 brew install xcodegen && xcodegen generate
