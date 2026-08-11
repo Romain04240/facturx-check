@@ -148,6 +148,86 @@ public struct FacturXReport: Sendable, Identifiable {
                                 consequence: "Le contrôle d'addition n'a pas pu être fait."))
         }
 
+        // MARK: - Les règles du socle européen
+        //
+        // Elles étaient hors périmètre : l'outil vérifiait la structure et les
+        // additions, pas la norme. C'était défendable tant qu'il ne savait rien
+        // en dire ; ça ne l'est plus, puisqu'un rejet chez le destinataire cite
+        // précisément ces codes-là. Chaque contrôle porte donc le sien, pour
+        // qu'on retrouve la règle officielle sans avoir à nous croire.
+        //
+        // Le périmètre est **explicite plutôt qu'exhaustif** : ce qui n'est pas
+        // vérifié n'est pas prétendu. Les règles qui portent sur les lignes de
+        // détail (BR-21 à BR-31) ne peuvent pas l'être ici — le lecteur ne les
+        // extrait pas.
+
+        // BR-04. Sans code de type, le destinataire ne sait pas s'il reçoit
+        // une facture ou un avoir : il crédite ce qu'il devrait débiter.
+        switch invoice.documentTypeCode {
+        case "380":
+            checks.append(Check(.passed, "Type de document : facture (380)"))
+        case "381":
+            checks.append(Check(.passed, "Type de document : avoir (381)"))
+        case let code?:
+            checks.append(Check(.warning, "Type de document inhabituel : \(code)",
+                                consequence: "BR-04. Le socle attend 380 pour une facture, 381 pour un avoir. Un autre code se comporte différemment chez le destinataire."))
+        case nil:
+            checks.append(Check(.failed, "Aucun type de document",
+                                consequence: "BR-04. Rien ne dit s'il s'agit d'une facture ou d'un avoir : le destinataire peut créditer ce qu'il devrait débiter."))
+        }
+
+        // BR-CO-26. L'émetteur doit être identifiable autrement que par son
+        // nom — deux entreprises peuvent s'appeler pareil, et le rapprochement
+        // comptable se fait sur l'identifiant, jamais sur la raison sociale.
+        let emetteurIdentifie = invoice.sellerLegalID?.isEmpty == false
+            || invoice.sellerVATNumber?.isEmpty == false
+        checks.append(emetteurIdentifie
+            ? Check(.passed, "Émetteur identifié par son immatriculation")
+            : Check(.failed, "L'émetteur n'a ni immatriculation ni numéro de TVA",
+                    consequence: "BR-CO-26. Deux entreprises peuvent porter le même nom : sans identifiant, le destinataire ne sait pas rapprocher la facture d'un fournisseur."))
+
+        // BR-CO-14. Le total de TVA doit être la somme de sa ventilation. Un
+        // écart ici veut dire qu'un taux a été oublié dans le détail, ou
+        // compté deux fois — et le pied de facture, lui, paraît juste.
+        if let vat = invoice.totalVAT, !invoice.vatBreakdown.isEmpty {
+            let somme = invoice.vatBreakdown.reduce(Decimal(0)) { $0 + $1.amount }
+            let ecart = abs(somme - vat)
+            checks.append(ecart <= cent
+                ? Check(.passed, "Le total de TVA correspond à sa ventilation")
+                : Check(.failed, "La ventilation totalise \(money(somme)) de TVA, le pied de facture en déclare \(money(vat))",
+                        consequence: "BR-CO-14. Écart de \(money(ecart)). Un taux manque au détail, ou y figure deux fois."))
+        }
+
+        // BR-S-08. Sur chaque taux, la taxe doit être la base multipliée par
+        // le taux. C'est le contrôle qui distingue une facture fausse d'une
+        // facture mal additionnée : les totaux peuvent tomber juste alors
+        // qu'aucune ligne du détail n'est cohérente.
+        for row in invoice.vatBreakdown where row.rate > 0 {
+            // Arrondi au centime, comme la norme le veut : la comparaison
+            // porte sur ce qu'un destinataire recalculera, pas sur une
+            // décimale infinie qui ne tombe jamais juste.
+            var brut = row.baseHT * row.rate / 100
+            var attendu = Decimal()
+            NSDecimalRound(&attendu, &brut, 2, .plain)
+            let ecart = abs(attendu - row.amount)
+            guard ecart > cent else { continue }
+            checks.append(Check(.failed,
+                                "Au taux de \(AmountFormat.rate(row.rate)) %, \(money(row.baseHT)) donnent \(money(attendu)) de TVA, le document en déclare \(money(row.amount))",
+                                consequence: "BR-S-08. Écart de \(money(ecart)) sur ce taux."))
+        }
+        if invoice.vatBreakdown.contains(where: { $0.rate > 0 })
+            && !checks.contains(where: { $0.consequence?.hasPrefix("BR-S-08") == true }) {
+            checks.append(Check(.passed, "Chaque taux de TVA retombe sur sa base"))
+        }
+
+        // BR-15. Le montant à payer : ce que le destinataire doit virer. Son
+        // absence oblige à le recalculer, et deux logiciels ne s'accordent pas
+        // toujours sur les acomptes déjà versés.
+        if invoice.duePayable == nil {
+            checks.append(Check(.warning, "Le montant à payer n'est pas déclaré",
+                                consequence: "BR-15. Le destinataire doit le recalculer lui-même, acomptes compris."))
+        }
+
         // La ventilation doit retomber sur le pied de facture, sinon les deux
         // parties de la facture se contredisent.
         if !invoice.vatBreakdown.isEmpty, let ht = invoice.totalHT {

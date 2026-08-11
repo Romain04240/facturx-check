@@ -13,6 +13,12 @@ final class FacturXReportTests: XCTestCase {
     private func makeXML(profile: String = "urn:factur-x.eu:1p0:basicwl",
                          number: String? = "F26-001",
                          seller: String? = "Blanc-Conseil",
+                         // **L'immatriculation de l'émetteur, désormais.**
+                         // BR-CO-26 l'exige, et la facture d'essai s'en passait
+                         // tant que rien ne la contrôlait — deux entreprises
+                         // peuvent porter le même nom, le rapprochement
+                         // comptable se fait sur l'identifiant.
+                         sellerLegalID: String? = "84219703600024",
                          buyer: String? = "Atelier Bréal",
                          base: String = "1000.00",
                          tax: String = "200.00",
@@ -48,7 +54,7 @@ final class FacturXReportTests: XCTestCase {
           </rsm:ExchangedDocument>
           <rsm:SupplyChainTradeTransaction>
             <ram:ApplicableHeaderTradeAgreement>
-              <ram:SellerTradeParty>\(element("Name", seller))</ram:SellerTradeParty>
+              <ram:SellerTradeParty>\(element("Name", seller))\(sellerLegalID.map { "<ram:SpecifiedLegalOrganization><ram:ID>\($0)</ram:ID></ram:SpecifiedLegalOrganization>" } ?? "")</ram:SellerTradeParty>
               <ram:BuyerTradeParty>\(element("Name", buyer))</ram:BuyerTradeParty>
             </ram:ApplicableHeaderTradeAgreement>
             <ram:ApplicableHeaderTradeSettlement>
@@ -90,9 +96,13 @@ final class FacturXReportTests: XCTestCase {
     /// un échec, pas comme un avertissement : le destinataire, lui, rejette.
     func testTotalsThatDoNotAddUpAreAFailure() throws {
         let checks = FacturXReport.evaluate(try invoice(makeXML(grand: "1250.00")))
-        XCTAssertEqual(failures(checks).count, 1)
-        XCTAssertTrue(failures(checks)[0].contains("1\u{202F}200,00\u{A0}€"),
-                      "le rapport doit donner le total attendu : \(failures(checks)[0])")
+        // **Nommé, et non compté.** La version d'avant vérifiait « un seul
+        // échec » : tout contrôle ajouté ensuite la faisait tomber sans rien
+        // apprendre sur l'addition, qui est son sujet.
+        let addition = failures(checks).first { $0.contains("HT + TVA") }
+        XCTAssertNotNil(addition, "l'échec d'addition n'est pas signalé : \(failures(checks))")
+        XCTAssertTrue(addition?.contains("1\u{202F}200,00\u{A0}€") == true,
+                      "le rapport doit donner le total attendu : \(addition ?? "")")
     }
 
     /// Les sommes citées dans un échec sont lues par quelqu'un qui n'a pas
@@ -118,7 +128,14 @@ final class FacturXReportTests: XCTestCase {
 
     func testAVATBreakdownThatContradictsTheFooterIsAFailure() throws {
         let checks = FacturXReport.evaluate(try invoice(makeXML(breakdownBase: "900.00")))
-        XCTAssertEqual(failures(checks).count, 1)
+        // **Deux échecs, et c'est juste.** La base ventilée contredit le pied
+        // de facture, et la taxe déclarée ne correspond plus à cette base :
+        // 900 € à 20 % font 180 €, pas 200. Le test comptait les échecs et
+        // tombait donc au premier contrôle ajouté ; il les nomme maintenant.
+        XCTAssertTrue(failures(checks).contains { $0.contains("bases ventilées") },
+                      "la contradiction avec le pied de facture n'est pas signalée : \(failures(checks))")
+        XCTAssertTrue(failures(checks).contains { $0.contains("de TVA, le document en déclare") },
+                      "l'écart entre la base et sa taxe n'est pas signalé : \(failures(checks))")
     }
 
     // MARK: - Les devises
@@ -225,5 +242,48 @@ final class FacturXReportTests: XCTestCase {
         let report = FacturXReport.analyse(fileURL: URL(fileURLWithPath: "/introuvable/nulle-part.pdf"))
         XCTAssertFalse(report.outcome.isSound)
         XCTAssertEqual(report.fileName, "nulle-part.pdf")
+    }
+
+    // MARK: - Les règles du socle européen
+
+    /// **BR-CO-26.** Deux entreprises peuvent porter le même nom : sans
+    /// immatriculation ni numéro de TVA, le destinataire ne sait pas à quel
+    /// fournisseur rattacher la facture.
+    func testAnUnidentifiedSellerIsAFailure() throws {
+        let checks = FacturXReport.evaluate(try invoice(makeXML(sellerLegalID: nil)))
+        XCTAssertTrue(failures(checks).contains { $0.contains("ni immatriculation ni numéro de TVA") },
+                      "l'émetteur non identifié n'est pas signalé : \(failures(checks))")
+    }
+
+    /// **BR-S-08.** Le contrôle qui distingue une facture fausse d'une facture
+    /// mal additionnée : les totaux peuvent tomber juste alors qu'aucune ligne
+    /// du détail n'est cohérente. Ici la base et le pied s'accordent, mais la
+    /// taxe déclarée sur ce taux ne correspond pas à sa propre base.
+    func testATaxThatDoesNotMatchItsOwnBaseIsAFailure() throws {
+        // 1 000 € à 20 % font 200 €. Le document en déclare 150, et ajuste le
+        // pied pour que « HT + TVA = TTC » tombe juste : sans BR-S-08, rien
+        // n'accrocherait.
+        let checks = FacturXReport.evaluate(try invoice(makeXML(tax: "150.00", grand: "1150.00")))
+        XCTAssertTrue(failures(checks).contains { $0.contains("de TVA, le document en déclare") },
+                      "l'écart entre une base et sa taxe n'est pas signalé : \(failures(checks))")
+    }
+
+    /// **BR-04.** Sans code de type, le destinataire ne sait pas s'il reçoit
+    /// une facture ou un avoir — il crédite ce qu'il devrait débiter.
+    func testAMissingDocumentTypeIsAFailure() throws {
+        let sansType = makeXML().replacingOccurrences(of: "<ram:TypeCode>380</ram:TypeCode>", with: "")
+        let checks = FacturXReport.evaluate(try invoice(sansType))
+        XCTAssertTrue(failures(checks).contains { $0.contains("Aucun type de document") },
+                      "l'absence de type n'est pas signalée : \(failures(checks))")
+    }
+
+    /// Un avoir se reconnaît, et se dit. Le confondre avec une facture inverse
+    /// le sens de l'écriture chez le destinataire.
+    func testACreditNoteIsRecognised() throws {
+        let avoir = makeXML().replacingOccurrences(of: "<ram:TypeCode>380</ram:TypeCode>",
+                                                   with: "<ram:TypeCode>381</ram:TypeCode>")
+        let checks = FacturXReport.evaluate(try invoice(avoir))
+        XCTAssertTrue(checks.contains { $0.message.contains("avoir (381)") })
+        XCTAssertTrue(failures(checks).isEmpty, "un avoir conforme ne doit rien faire échouer : \(failures(checks))")
     }
 }

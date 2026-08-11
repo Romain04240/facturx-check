@@ -8,7 +8,7 @@ La réponse en le déposant — et rien ne quitte votre Mac.
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-1d1d1f?logo=apple&logoColor=white)](#la-construire)
 [![Swift 5](https://img.shields.io/badge/Swift-5-F05138?logo=swift&logoColor=white)](#la-construire)
 [![Aucun accès réseau](https://img.shields.io/badge/r%C3%A9seau-aucun%20droit%20demand%C3%A9-2ea44f)](#rien-ne-quitte-votre-machine)
-[![42 tests](https://img.shields.io/badge/tests-42-2ea44f)](Tests)
+[![46 tests](https://img.shields.io/badge/tests-46-2ea44f)](Tests)
 [![Licence MIT](https://img.shields.io/badge/licence-MIT-0a7cba)](LICENSE)
 
 ### [⬇︎ Télécharger l'application](https://github.com/Romain04240/facturx-check/releases/latest)
